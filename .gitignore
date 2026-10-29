@@ -1,0 +1,37 @@
+# Python sanal ortamı ve önbellekler
+.venv/
+venv/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Yerel ortam değişkenleri
+.env
+.env.*
+!.env.example
+
+# İşletim sistemi / editör dosyaları
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+
+# Credentials and private documents
+*.pem
+*.key
+*.p12
+*.pfx
+private/
+uploads/
+exports/
+local-data/
+
+# Local tools and shareable archive
+.tools/
+node_modules/
+CodeDetector-github.zip

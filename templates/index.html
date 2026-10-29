@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CodeDetector — Gemma 4 ile kod değişikliği risk analizi</title>
+  <meta name="description" content="Kod değişikliklerinin neleri bozabileceğini Gemma 4 ile analiz eden ve test kontrol listesi üreten kod inceleme aracı.">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ version }}">
+  <script src="{{ url_for('static', filename='app.js') }}?v={{ version }}" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">İçeriğe geç</a>
+
+  <!-- ============================== Üst bilgi ============================== -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/" aria-label="CodeDetector ana sayfa">
+        <svg class="brand-logo" viewBox="0 0 32 32" aria-hidden="true">
+          <circle cx="16" cy="16" r="14" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".35"/>
+          <circle cx="16" cy="16" r="9" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55"/>
+          <circle cx="16" cy="16" r="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M16 16 L27 9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="22.5" cy="11.8" r="1.8" fill="#f97316"/>
+        </svg>
+        <span class="brand-text">
+          <strong>CodeDetector</strong>
+          <small>Kod değişikliği analizi</small>
+        </span>
+      </a>
+
+      <div class="topbar-right">
+        <span id="demo-indicator" class="pill pill-demo" hidden>DEMO MODU</span>
+        <button id="engine-status" class="engine-status" type="button" aria-live="polite" title="Gemma 4 bağlantısını yeniden kontrol et">
+          <span class="dot dot-checking" aria-hidden="true"></span>
+          <span class="engine-label">Gemma 4</span>
+          <span class="engine-detail">kontrol ediliyor…</span>
+        </button>
+        <button id="new-analysis" class="btn btn-ghost" type="button">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          Yeni Analiz
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <h1>Bu değişiklik neyi bozabilir, nasıl test etmeliyim?</h1>
+      <p>Eski ve yeni kodu ya da bir Git diff'i verin. <strong>Gemma 4</strong> gerçek değişikliği inceler, olası
+        regresyonları kanıtlarıyla birlikte listeler ve size özel bir test kontrol listesi üretir. Kod
+        <em>çalıştırılmaz</em>, yalnızca statik olarak incelenir ve kalıcı olarak saklanmaz.</p>
+    </section>
+
+    <!-- ===================== Model kurulum / bağlantı uyarısı ===================== -->
+    <section id="setup-banner" class="banner banner-warn" hidden aria-live="polite">
+      <div class="banner-icon" aria-hidden="true">!</div>
+      <div class="banner-body">
+        <h2 id="setup-title">Gemma 4'e bağlanılamıyor</h2>
+        <p id="setup-message"></p>
+        <p id="setup-hint" class="muted"></p>
+        <details class="setup-steps">
+          <summary>Kurulum adımları</summary>
+          <ol>
+            <li><a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer">Ollama</a>'yı kurun ve başlatın.</li>
+            <li>Bir Gemma 4 modeli indirin: <code id="setup-pull">ollama pull gemma4:e2b</code></li>
+            <li>Gerekirse <code>.env</code> dosyasında <code>GEMMA_MODEL</code> değerini kurulu modelle eşleştirin.</li>
+            <li>Sağ üstteki <strong>Gemma 4</strong> durum düğmesine tıklayarak bağlantıyı yeniden kontrol edin.</li>
+          </ol>
+        </details>
+        <p class="muted small">Gemma 4 olmadan gerçek analiz yapılmaz. Sunum için yalnızca <strong>örnek senaryoda</strong>, açıkça
+          etiketlenmiş sabit <strong>DEMO</strong> sonuçlarını görüntüleyebilirsiniz.</p>
+      </div>
+    </section>
+
+    <!-- ============================== Girdi alanı ============================== -->
+    <section id="workspace" class="card" aria-labelledby="workspace-title">
+      <div class="card-head">
+        <h2 id="workspace-title">Girdi</h2>
+        <button id="load-sample" class="btn btn-subtle" type="button" title="Demo için örnek eski/yeni kodu yükler">
+          Örnek senaryoyu yükle
+        </button>
+      </div>
+
+      <div class="tabs" role="tablist" aria-label="Girdi modu">
+        <button class="tab" role="tab" id="tab-code" aria-controls="panel-code" aria-selected="true" data-mode="code">Eski / Yeni Kod</button>
+        <button class="tab" role="tab" id="tab-diff" aria-controls="panel-diff" aria-selected="false" data-mode="diff" tabindex="-1">Git Diff</button>
+        <button class="tab" role="tab" id="tab-upload" aria-controls="panel-upload" aria-selected="false" data-mode="upload" tabindex="-1">Dosya Yükle</button>
+      </div>
+
+      <div id="sample-label" class="sample-label" hidden>ÖRNEK VERİ · Demo senaryosu: kayıt doğrulama fonksiyonunda yapılan bir değişiklik</div>
+
+      <div class="options-row">
+        <label class="field field-inline" id="filename-field">
+          <span>Dosya adı <small class="muted">(isteğe bağlı)</small></span>
+          <input id="filename" type="text" placeholder="örn. src/users/validation.py" maxlength="200" autocomplete="off" spellcheck="false">
+        </label>
+        <label class="field field-inline">
+          <span>Dil</span>
+          <select id="language">
+            <option value="auto">Otomatik algıla</option>
+            <option value="python">Python</option>
+            <option value="javascript">JavaScript</option>
+            <option value="typescript">TypeScript</option>
+            <option value="java">Java</option>
+            <option value="csharp">C#</option>
+            <option value="go">Go</option>
+            <option value="rust">Rust</option>
+            <option value="php">PHP</option>
+            <option value="ruby">Ruby</option>
+            <option value="kotlin">Kotlin</option>
+            <option value="c">C</option>
+            <option value="cpp">C++</option>
+            <option value="sql">SQL</option>
+            <option value="shell">Shell</option>
+            <option value="html">HTML</option>
+            <option value="css">CSS</option>
+          </select>
+        </label>
+      </div>
+
+      <!-- Eski / yeni kod -->
+      <div class="tab-panel" id="panel-code" role="tabpanel" aria-labelledby="tab-code">
+        <div class="editor-grid">
+          <div class="editor-wrap">
+            <label class="editor-label" for="old-code"><span class="tag tag-del">ESKİ</span> Önceki sürüm</label>
+            <div class="editor" data-editor>
+              <div class="gutter" aria-hidden="true"></div>
+              <div class="editor-scroll">
+                <pre class="highlight" aria-hidden="true"><code></code></pre>
+                <textarea id="old-code" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" placeholder="Değişiklikten önceki kodu buraya yapıştırın…"></textarea>
+              </div>
+            </div>
+          </div>
+          <div class="editor-wrap">
+            <label class="editor-label" for="new-code"><span class="tag tag-add">YENİ</span> Değiştirilmiş sürüm</label>
+            <div class="editor" data-editor>
+              <div class="gutter" aria-hidden="true"></div>
+              <div class="editor-scroll">
+                <pre class="highlight" aria-hidden="true"><code></code></pre>
+                <textarea id="new-code" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" placeholder="Değişiklikten sonraki kodu buraya yapıştırın…"></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Git diff -->
+      <div class="tab-panel" id="panel-diff" role="tabpanel" aria-labelledby="tab-diff" hidden>
+        <div class="editor-wrap">
+          <label class="editor-label" for="diff-text"><span class="tag">DIFF</span> <code>git diff</code> çıktısı veya unified diff</label>
+          <div class="editor editor-tall" data-editor data-lang="diff">
+            <div class="gutter" aria-hidden="true"></div>
+            <div class="editor-scroll">
+              <pre class="highlight" aria-hidden="true"><code></code></pre>
+              <textarea id="diff-text" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" placeholder="diff --git a/app.py b/app.py&#10;--- a/app.py&#10;+++ b/app.py&#10;@@ -10,7 +10,7 @@ ..."></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dosya yükleme -->
+      <div class="tab-panel" id="panel-upload" role="tabpanel" aria-labelledby="tab-upload" hidden>
+        <div class="upload-mode" role="radiogroup" aria-label="Yükleme türü">
+          <label><input type="radio" name="upload-kind" value="pair" checked> Eski + yeni sürüm dosyaları</label>
+          <label><input type="radio" name="upload-kind" value="patch"> Tek .diff / .patch dosyası</label>
+        </div>
+        <div class="upload-grid" id="upload-pair">
+          <label class="dropzone" data-drop="old_file">
+            <input type="file" id="old-file" class="visually-hidden">
+            <span class="tag tag-del">ESKİ</span>
+            <strong>Önceki sürüm dosyası</strong>
+            <span class="dz-name muted">Dosya seçin veya buraya sürükleyin</span>
+          </label>
+          <label class="dropzone" data-drop="new_file">
+            <input type="file" id="new-file" class="visually-hidden">
+            <span class="tag tag-add">YENİ</span>
+            <strong>Değiştirilmiş sürüm dosyası</strong>
+            <span class="dz-name muted">Dosya seçin veya buraya sürükleyin</span>
+          </label>
+        </div>
+        <div class="upload-grid upload-single" id="upload-patch" hidden>
+          <label class="dropzone" data-drop="patch_file">
+            <input type="file" id="patch-file" class="visually-hidden" accept=".diff,.patch,.txt">
+            <span class="tag">PATCH</span>
+            <strong>.diff / .patch dosyası</strong>
+            <span class="dz-name muted">Dosya seçin veya buraya sürükleyin</span>
+          </label>
+        </div>
+        <p class="muted small">Yalnızca metin tabanlı kaynak kod ve diff dosyaları kabul edilir (dosya başına en fazla
+          <span id="max-upload-kb">512</span> KB). Yüklenen kod <strong>asla çalıştırılmaz</strong>.</p>
+      </div>
+
+      <label class="field">
+        <span>Değişikliğin amacı <small class="muted">(isteğe bağlı, analiz kalitesini artırır)</small></span>
+        <textarea id="description" rows="2" maxlength="2000" placeholder="örn. Yaş doğrulamasını string değerleri de kabul edecek şekilde güncelledim."></textarea>
+      </label>
+
+      <div id="input-error" class="alert alert-error" role="alert" hidden></div>
+
+      <div class="actions">
+        <span class="muted small kbd-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> ile analiz et</span>
+        <button id="preview-diff" class="btn btn-ghost" type="button">Diff'i Önizle</button>
+        <button id="analyze" class="btn btn-primary" type="button">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 10 L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          Değişiklikleri Analiz Et
+        </button>
+      </div>
+    </section>
+
+    <!-- ============================== Yükleniyor ============================== -->
+    <section id="loading" class="card loading-card" hidden aria-live="polite" aria-busy="true">
+      <div class="analysis-spinner" aria-hidden="true"><span></span></div>
+      <div>
+        <h2>Gemma 4 değişiklikleri inceliyor…</h2>
+        <p class="muted" id="loading-detail">Diff hazırlandı, model yanıtı bekleniyor.</p>
+        <p class="muted small">Geçen süre: <span id="loading-elapsed">0</span> sn · Yerel donanımda ilk analiz, model belleğe yüklenirken birkaç dakika sürebilir.</p>
+      </div>
+      <button id="cancel-analysis" class="btn btn-ghost" type="button">İptal</button>
+    </section>
+
+    <!-- ============================ Analiz hatası ============================= -->
+    <section id="analysis-error" class="banner banner-error" hidden role="alert">
+      <div class="banner-icon" aria-hidden="true">×</div>
+      <div class="banner-body">
+        <h2 id="analysis-error-title">Analiz tamamlanamadı</h2>
+        <p id="analysis-error-message"></p>
+        <p id="analysis-error-hint" class="muted"></p>
+        <div class="banner-actions">
+          <button id="retry-analysis" class="btn btn-primary" type="button">Tekrar dene</button>
+          <button id="show-demo" class="btn btn-ghost" type="button" hidden>DEMO sonucunu göster (Gemma 4 değil)</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= Diff önizleme ============================ -->
+    <section id="diff-section" class="card" hidden aria-labelledby="diff-title">
+      <div class="card-head">
+        <h2 id="diff-title">Değişiklikler</h2>
+        <div class="diff-legend small">
+          <span class="legend legend-add">Eklenen</span>
+          <span class="legend legend-del">Silinen</span>
+          <span class="legend legend-mod">Değiştirilmiş bölüm</span>
+        </div>
+      </div>
+      <div id="diff-stats" class="diff-stats"></div>
+      <div id="diff-view"></div>
+    </section>
+
+    <!-- ================================ Sonuçlar =============================== -->
+    <section id="results" hidden aria-labelledby="results-title">
+      <div id="engine-banner" class="engine-banner"></div>
+
+      <div class="card summary-card">
+        <div class="card-head">
+          <h2 id="results-title">Risk özeti</h2>
+          <div class="export-buttons">
+            <button id="export-md" class="btn btn-ghost btn-sm" type="button">Markdown indir</button>
+            <button id="export-json" class="btn btn-ghost btn-sm" type="button">JSON indir</button>
+          </div>
+        </div>
+        <div class="summary-grid">
+          <div id="overall-risk" class="overall-risk"></div>
+          <div>
+            <div id="severity-counts" class="severity-counts"></div>
+            <p id="summary-text" class="summary-text"></p>
+          </div>
+        </div>
+        <div id="result-warnings"></div>
+      </div>
+
+      <div class="results-grid">
+        <div class="card">
+          <div class="card-head">
+            <h2>Bulgular</h2>
+            <div class="small muted" id="findings-meta"></div>
+          </div>
+          <div id="findings"></div>
+        </div>
+
+        <div class="side-col">
+          <div class="card">
+            <div class="card-head"><h2>Etkilenen bileşenler</h2></div>
+            <div id="components"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Bilinmeyenler</h2></div>
+            <p class="muted small">Sağlanan koddan belirlenemeyen etkiler.</p>
+            <ul id="unknowns" class="plain-list"></ul>
+          </div>
+          <div class="card legend-card">
+            <h3>Kanıt türleri</h3>
+            <dl class="legend-list">
+              <dt><span class="ev ev-confirmed">Doğrulanmış gözlem</span></dt><dd>Diff'te doğrudan görülen değişiklik.</dd>
+              <dt><span class="ev ev-plausible">Doğrulanmalı risk</span></dt><dd>Olası sonuç; test ile teyit edilmeli.</dd>
+              <dt><span class="ev ev-unknown">Bilinmeyen etki</span></dt><dd>Mevcut koddan belirlenemiyor.</dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+
+      <!-- Test kontrol listesi -->
+      <div class="card" id="tests-card">
+        <div class="card-head">
+          <h2>Test kontrol listesi</h2>
+          <div class="small muted">Testler bu araç tarafından <strong>çalıştırılmaz</strong>; durumlarını siz işaretlersiniz.</div>
+        </div>
+        <div class="progress-wrap">
+          <div class="progress" role="progressbar" aria-label="Test ilerlemesi" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="test-progress">
+            <span class="progress-pass"></span><span class="progress-fail"></span><span class="progress-block"></span>
+          </div>
+          <div id="progress-text" class="small"></div>
+        </div>
+        <div class="filters" role="group" aria-label="Test filtreleri">
+          <label class="field field-inline"><span>Öncelik</span>
+            <select id="filter-priority">
+              <option value="all">Tümü</option><option value="high">Yüksek</option><option value="medium">Orta</option><option value="low">Düşük</option>
+            </select>
+          </label>
+          <label class="field field-inline"><span>Durum</span>
+            <select id="filter-status">
+              <option value="all">Tümü</option><option value="pending">Bekliyor</option><option value="passed">Geçti</option>
+              <option value="failed">Kaldı</option><option value="blocked">Engellendi</option>
+            </select>
+          </label>
+          <label class="field field-inline"><span>Kategori</span>
+            <select id="filter-category">
+              <option value="all">Tümü</option><option value="regression">Regresyon</option><option value="unit">Birim</option>
+              <option value="integration">Entegrasyon</option><option value="edge_case">Uç durum</option>
+              <option value="security">Güvenlik</option><option value="manual">Manuel doğrulama</option>
+            </select>
+          </label>
+        </div>
+        <ul id="tests" class="tests"></ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>CodeDetector v{{ version }} · Analiz motoru: <strong>Gemma 4</strong> (yerel, Ollama)
+      · Kodunuz cihazınızdan çıkmaz ve kalıcı olarak saklanmaz.</p>
+    <p class="muted small">Bulgular statik analize dayanır ve doğrulama gerektirir; hiçbir kod veya test otomatik olarak çalıştırılmaz.</p>
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
